@@ -33,8 +33,13 @@
 #include <vulkan/vk_layer.h>
 #include <vulkan/vulkan.h>
 
-#if (!defined(VK_USE_PLATFORM_XCB_KHR) && !defined(VK_USE_PLATFORM_WIN32_KHR))
-#warning "Monitor layer only has code for XCB and Windows at this time"
+#if (!defined(VK_USE_PLATFORM_XCB_KHR) && !defined(VK_USE_PLATFORM_WIN32_KHR) && !defined(VK_USE_PLATFORM_ANDROID_KHR))
+#warning "Monitor layer only has code for XCB, Windows and Android at this time"
+#endif
+
+#ifdef ANDROID
+#include <android/log.h>
+#include <sys/system_properties.h>
 #endif
 
 #define TITLE_LENGTH 1000
@@ -69,6 +74,9 @@ template layer_data *GetLayerDataPtr<layer_data>(void *data_key, std::unordered_
 
 VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateDevice(VkPhysicalDevice gpu, const VkDeviceCreateInfo *pCreateInfo,
                                                               const VkAllocationCallbacks *pAllocator, VkDevice *pDevice) {
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "monitor", "Create Device\n");
+#endif
     VkLayerDeviceCreateInfo *chain_info = get_chain_info(pCreateInfo, VK_LAYER_LINK_INFO);
 
     assert(chain_info->u.pLayerInfo);
@@ -146,6 +154,10 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkCreateInstance(const VkInstance
     my_data->instance_dispatch_table = new VkLayerInstanceDispatchTable;
     layer_init_instance_dispatch_table(*pInstance, my_data->instance_dispatch_table, fpGetInstanceProcAddr);
 
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "monitor", "Create Instance with table %p\n", my_data->instance_dispatch_table);
+#endif
+
     return result;
 }
 
@@ -218,6 +230,10 @@ VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceToolProperties
     }
 
     (*pToolCount)++;
+
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "monitor", "vkGetPhysicalDeviceToolPropertiesEXT table %p device %p\n", my_data->instance_dispatch_table, get_dispatch_key(physicalDevice));
+#endif
 
     return result;
 }
@@ -294,6 +310,10 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(V
     ADD_HOOK(vkDestroyInstance);
     ADD_HOOK(vkGetInstanceProcAddr);
     ADD_HOOK(vkGetPhysicalDeviceToolPropertiesEXT);
+    ADD_HOOK(vkEnumerateInstanceLayerProperties);
+    ADD_HOOK(vkEnumerateDeviceLayerProperties);
+    ADD_HOOK(vkEnumerateInstanceExtensionProperties);
+    ADD_HOOK(vkEnumerateDeviceExtensionProperties);
 #if defined(VK_USE_PLATFORM_WIN32_KHR)
     ADD_HOOK(vkCreateWin32SurfaceKHR);
 #elif defined(VK_USE_PLATFORM_XCB_KHR)
@@ -309,4 +329,86 @@ VK_LAYER_EXPORT VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL vkGetInstanceProcAddr(V
 
     if (pTable->GetInstanceProcAddr == NULL) return NULL;
     return pTable->GetInstanceProcAddr(instance, funcName);
+}
+
+static const VkLayerProperties global_layer = {
+    "VK_LAYER_LUNARG_monitor",      // layerName
+    VK_MAKE_VERSION(1, 0, 68),      // specVersion (clamped to final 1.0 spec version)
+    1,                              // implementationVersion
+    "Layer: monitor",               // description
+};
+
+VKAPI_ATTR VkResult VKAPI_CALL EnumerateInstanceLayerProperties(uint32_t *pCount, VkLayerProperties *pProperties) {
+    return util_GetLayerProperties(1, &global_layer, pCount, pProperties);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceLayerProperties(VkPhysicalDevice physicalDevice, uint32_t *pCount,
+                                                              VkLayerProperties *pProperties) {
+    return util_GetLayerProperties(1, &global_layer, pCount, pProperties);
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL EnumerateInstanceExtensionProperties(const char *pLayerName, uint32_t *pCount,
+                                                                    VkExtensionProperties *pProperties) {
+    if (pLayerName && !strcmp(pLayerName, global_layer.layerName)) return util_GetExtensionProperties(0, NULL, pCount, pProperties);
+
+    return VK_ERROR_LAYER_NOT_PRESENT;
+}
+
+VKAPI_ATTR VkResult VKAPI_CALL EnumerateDeviceExtensionProperties(VkPhysicalDevice physicalDevice, const char *pLayerName,
+                                                                  uint32_t *pCount, VkExtensionProperties *pProperties) {
+    if (pLayerName && !strcmp(pLayerName, global_layer.layerName))
+    {
+#ifdef ANDROID
+        __android_log_print(ANDROID_LOG_INFO, "monitor", "EnumerateDeviceExtensionProperties %s\n", pLayerName);
+#endif
+        return util_GetExtensionProperties(0, NULL, pCount, pProperties);
+    }
+
+    assert(physicalDevice);
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "monitor", "EnumerateDeviceExtensionProperties after assert %s %p\n", pLayerName, physicalDevice);
+#endif
+    dispatch_key key = get_dispatch_key(physicalDevice);
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "monitor", "EnumerateDeviceExtensionProperties key %p\n", key);
+#endif
+    layer_data *my_data = GetLayerDataPtr(key, layer_data_map);
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "monitor", "EnumerateDeviceExtensionProperties table %p device %p\n", my_data->instance_dispatch_table, get_dispatch_key(physicalDevice));
+#endif
+    VkResult result = my_data->instance_dispatch_table->EnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pCount, pProperties);
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "monitor", "EnumerateDeviceExtensionProperties after enumerate\n");
+#endif
+    return result;
+}
+
+// loader-layer interface v0, just wrappers since there is only a layer
+
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceLayerProperties(uint32_t *pCount,
+                                                                                  VkLayerProperties *pProperties) {
+    return EnumerateInstanceLayerProperties(pCount, pProperties);
+}
+
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceLayerProperties(VkPhysicalDevice physicalDevice, uint32_t *pCount,
+                                                                                VkLayerProperties *pProperties) {
+    // the layer command handles VK_NULL_HANDLE just fine internally
+    assert(physicalDevice == VK_NULL_HANDLE);
+    return EnumerateDeviceLayerProperties(VK_NULL_HANDLE, pCount, pProperties);
+}
+
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateInstanceExtensionProperties(const char *pLayerName, uint32_t *pCount,
+                                                                                      VkExtensionProperties *pProperties) {
+    return EnumerateInstanceExtensionProperties(pLayerName, pCount, pProperties);
+}
+
+VK_LAYER_EXPORT VKAPI_ATTR VkResult VKAPI_CALL vkEnumerateDeviceExtensionProperties(VkPhysicalDevice physicalDevice,
+                                                                                    const char *pLayerName, uint32_t *pCount,
+                                                                                    VkExtensionProperties *pProperties) {
+#ifdef ANDROID
+    __android_log_print(ANDROID_LOG_INFO, "monitor", "vkEnumerateDeviceExtensionProperties %s %p\n", pLayerName, physicalDevice);
+#endif
+    // the layer command handles VK_NULL_HANDLE just fine internally
+    assert(physicalDevice == VK_NULL_HANDLE);
+    return EnumerateDeviceExtensionProperties(physicalDevice, pLayerName, pCount, pProperties);
 }

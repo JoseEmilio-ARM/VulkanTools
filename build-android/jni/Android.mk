@@ -70,6 +70,21 @@ LOCAL_LDLIBS    := -llog
 include $(BUILD_SHARED_LIBRARY)
 
 include $(CLEAR_VARS)
+LOCAL_MODULE := VkLayer_monitor
+LOCAL_SRC_FILES += $(SRC_DIR)/layersvt/monitor.cpp
+LOCAL_SRC_FILES += $(SRC_DIR)/layersvt/vk_layer_table.cpp
+LOCAL_C_INCLUDES += $(LOCAL_PATH)/$(THIRD_PARTY)/Vulkan-Headers/include \
+                    $(LOCAL_PATH)/$(LVL_DIR)/layers \
+                    $(LOCAL_PATH)/$(LVL_DIR)/layers/generated \
+                    $(LOCAL_PATH)/$(SRC_DIR)/layersvt \
+                    $(LOCAL_PATH)/$(LAYER_DIR)/include
+LOCAL_STATIC_LIBRARIES += layer_utils
+LOCAL_CPPFLAGS += -std=c++11 -Wall -Werror -Wno-unused-function -Wno-unused-const-variable -mxgot
+LOCAL_CPPFLAGS += -DVK_ENABLE_BETA_EXTENSIONS -DVK_USE_PLATFORM_ANDROID_KHR -DVK_PROTOTYPES -fvisibility=hidden
+LOCAL_LDLIBS    := -llog
+include $(BUILD_SHARED_LIBRARY)
+
+include $(CLEAR_VARS)
 LOCAL_MODULE := VkLayer_device_simulation
 LOCAL_SRC_FILES += $(SRC_DIR)/layersvt/device_simulation.cpp
 LOCAL_SRC_FILES += $(SRC_DIR)/layersvt/vk_layer_table.cpp
